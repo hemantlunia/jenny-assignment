@@ -1,12 +1,36 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
+import time
+
 from .database import SessionLocal, engine, Base
 from . import crud, models
 from .services.ingestion import fetch_all_customers
 
 app = FastAPI()
 
-Base.metadata.create_all(bind=engine)
+
+# ✅ Proper DB wait logic (production-style)
+def wait_for_db(max_retries=10, delay=2):
+    for attempt in range(max_retries):
+        try:
+            conn = engine.connect()
+            conn.close()
+            print("Database connected")
+            return
+        except OperationalError:
+            print(f"DB not ready... retrying ({attempt+1}/{max_retries})")
+            time.sleep(delay)
+
+    raise Exception("Could not connect to database after retries")
+
+
+# ✅ Run at startup
+@app.on_event("startup")
+def startup():
+    wait_for_db()
+    Base.metadata.create_all(bind=engine)
+
 
 def get_db():
     db = SessionLocal()
